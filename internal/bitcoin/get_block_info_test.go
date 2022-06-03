@@ -1,0 +1,223 @@
+// Copyright © 2022 Kaleido, Inc.
+//
+// SPDX-License-Identifier: Apache-2.0
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+package bitcoin
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"testing"
+
+	"github.com/hyperledger/firefly-common/pkg/ffcapi"
+	"github.com/hyperledger/firefly-common/pkg/fftypes"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
+)
+
+const sampleGetBlockInfoByNumber = `{
+	"ffcapi": {
+		"version": "v1.0.0",
+		"id": "904F177C-C790-4B01-BDF4-F2B4E52E607E",
+		"type": "get_block_info_by_number"
+	},
+	"blockNumber": "100"
+}`
+
+const sampleGetBlockInfoByHash = `{
+	"ffcapi": {
+		"version": "v1.0.0",
+		"id": "904F177C-C790-4B01-BDF4-F2B4E52E607E",
+		"type": "get_block_info_by_hash"
+	},
+	"blockHash": "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a"
+}`
+
+const sampleBlockHashJSONRPC = "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a"
+
+const sampleBlockJSONRPC = `{
+	"hash": "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a",
+	"confirmations": 739022,
+	"height": 100,
+	"version": 1,
+	"versionHex": "00000001",
+	"merkleroot": "2d05f0c9c3e1c226e63b5fac240137687544cf631cd616fd34fd188fc9020866",
+	"time": 1231660825,
+	"mediantime": 1231656204,
+	"nonce": 1573057331,
+	"bits": "1d00ffff",
+	"difficulty": 1,
+	"chainwork": "0000000000000000000000000000000000000000000000000000006500650065",
+	"nTx": 1,
+	"previousblockhash": "00000000cd9b12643e6854cb25939b39cd7a1ad0af31a9bd8b2efe67854b1995",
+	"nextblockhash": "00000000b69bd8e4dc60580117617a466d5c76ada85fb7b87e9baea01f9d9984",
+	"strippedsize": 215,
+	"size": 215,
+	"weight": 860,
+	"tx": [
+		"2d05f0c9c3e1c226e63b5fac240137687544cf631cd616fd34fd188fc9020866"
+	]
+}`
+
+func TestGetBlockInfoByNumberOK(t *testing.T) {
+
+	c, mRPC := newTestConnector(t)
+	ctx := context.Background()
+
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblockhash",
+		mock.MatchedBy(
+			func(blockNumber *fftypes.FFBigInt) bool {
+				return blockNumber.Int().String() == "100"
+			})).
+		Return(nil).
+		Run(func(args mock.Arguments) {
+			arg1, ok := args[1].(*string)
+			assert.True(t, ok)
+			*arg1 = sampleBlockHashJSONRPC
+		})
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblock", "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a").
+		Return(nil).
+		Run(func(args mock.Arguments) {
+			err := json.Unmarshal([]byte(sampleBlockJSONRPC), args[1])
+			assert.NoError(t, err)
+		})
+
+	iRes, reason, err := c.getBlockInfoByNumber(ctx, []byte(sampleGetBlockInfoByNumber))
+	assert.NoError(t, err)
+	assert.Empty(t, reason)
+
+	res := iRes.(*ffcapi.GetBlockInfoByNumberResponse)
+	assert.Equal(t, "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a", res.BlockHash)
+	assert.Equal(t, "00000000cd9b12643e6854cb25939b39cd7a1ad0af31a9bd8b2efe67854b1995", res.ParentHash)
+	assert.Equal(t, int64(100), res.BlockNumber.Int64())
+
+}
+
+func TestGetBlockInfoByNumberNotFound(t *testing.T) {
+
+	c, mRPC := newTestConnector(t)
+	ctx := context.Background()
+
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblockhash", mock.Anything).
+		Return(nil).
+		Run(func(args mock.Arguments) {
+			arg1, ok := args[1].(*string)
+			assert.True(t, ok)
+			*arg1 = "null"
+		})
+
+	iRes, reason, err := c.getBlockInfoByNumber(ctx, []byte(sampleGetBlockInfoByNumber))
+	assert.Regexp(t, "FF23011", err)
+	assert.Equal(t, ffcapi.ErrorReasonNotFound, reason)
+	assert.Nil(t, iRes)
+
+}
+
+func TestGetBlockInfoByNumberFail(t *testing.T) {
+
+	c, mRPC := newTestConnector(t)
+	ctx := context.Background()
+
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblockhash", mock.Anything).
+		Return(fmt.Errorf("pop"))
+
+	iRes, reason, err := c.getBlockInfoByNumber(ctx, []byte(sampleGetBlockInfoByNumber))
+	assert.Regexp(t, "pop", err)
+	assert.Empty(t, reason)
+	assert.Nil(t, iRes)
+
+}
+
+func TestGetBlockInfoByNumberBadPayload(t *testing.T) {
+
+	c, _ := newTestConnector(t)
+	ctx := context.Background()
+
+	iRes, reason, err := c.getBlockInfoByNumber(ctx, []byte("!json"))
+	assert.Regexp(t, "invalid", err)
+	assert.Equal(t, ffcapi.ErrorReasonInvalidInputs, reason)
+	assert.Nil(t, iRes)
+
+}
+
+func TestGetBlockInfoByHashOK(t *testing.T) {
+
+	c, mRPC := newTestConnector(t)
+	ctx := context.Background()
+
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblock", "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a").
+		Return(nil).
+		Run(func(args mock.Arguments) {
+			err := json.Unmarshal([]byte(sampleBlockJSONRPC), args[1])
+			assert.NoError(t, err)
+		})
+
+	iRes, reason, err := c.getBlockInfoByHash(ctx, []byte(sampleGetBlockInfoByHash))
+	assert.NoError(t, err)
+	assert.Empty(t, reason)
+
+	res := iRes.(*ffcapi.GetBlockInfoByHashResponse)
+	assert.Equal(t, "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a", res.BlockHash)
+	assert.Equal(t, "00000000cd9b12643e6854cb25939b39cd7a1ad0af31a9bd8b2efe67854b1995", res.ParentHash)
+	assert.Equal(t, int64(100), res.BlockNumber.Int64())
+
+}
+
+func TestGetBlockInfoByHashNotFound(t *testing.T) {
+
+	c, mRPC := newTestConnector(t)
+	ctx := context.Background()
+
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblock", mock.Anything).
+		Return(nil).
+		Run(func(args mock.Arguments) {
+			err := json.Unmarshal([]byte("null"), args[1])
+			assert.NoError(t, err)
+		})
+
+	iRes, reason, err := c.getBlockInfoByHash(ctx, []byte(sampleGetBlockInfoByHash))
+	assert.Regexp(t, "FF23011", err)
+	assert.Equal(t, ffcapi.ErrorReasonNotFound, reason)
+	assert.Nil(t, iRes)
+
+}
+
+func TestGetBlockInfoByHashFail(t *testing.T) {
+
+	c, mRPC := newTestConnector(t)
+	ctx := context.Background()
+
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblock", mock.Anything).
+		Return(fmt.Errorf("pop"))
+
+	iRes, reason, err := c.getBlockInfoByHash(ctx, []byte(sampleGetBlockInfoByHash))
+	assert.Regexp(t, "pop", err)
+	assert.Empty(t, reason)
+	assert.Nil(t, iRes)
+
+}
+
+func TestGetBlockInfoByHashBadPayload(t *testing.T) {
+
+	c, _ := newTestConnector(t)
+	ctx := context.Background()
+
+	iRes, reason, err := c.getBlockInfoByHash(ctx, []byte("!json"))
+	assert.Regexp(t, "invalid", err)
+	assert.Equal(t, ffcapi.ErrorReasonInvalidInputs, reason)
+	assert.Nil(t, iRes)
+
+}

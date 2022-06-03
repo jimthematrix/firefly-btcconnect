@@ -1,0 +1,6 @@
+connectors:
+  - type: bitcoin
+    server:
+      address: :::::::wrong
+    bitcoin:
+      url: http://localhost:8332
