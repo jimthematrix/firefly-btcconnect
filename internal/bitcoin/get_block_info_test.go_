@@ -23,7 +23,6 @@ import (
 	"testing"
 
 	"github.com/hyperledger/firefly-common/pkg/ffcapi"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 )
@@ -79,16 +78,16 @@ func TestGetBlockInfoByNumberOK(t *testing.T) {
 
 	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblockhash",
 		mock.MatchedBy(
-			func(blockNumber *fftypes.FFBigInt) bool {
-				return blockNumber.Int().String() == "100"
+			func(blockNumber int64) bool {
+				return blockNumber == 100
 			})).
 		Return(nil).
 		Run(func(args mock.Arguments) {
-			arg1, ok := args[1].(*string)
+			arg1, ok := args[1].(*BlockHash)
 			assert.True(t, ok)
 			*arg1 = sampleBlockHashJSONRPC
 		})
-	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblock", "000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a").
+	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblock", BlockHash("000000007bc154e0fa7ea32218a72fe2c1bb9f86cf8c9ebf9a715ed27fdb229a")).
 		Return(nil).
 		Run(func(args mock.Arguments) {
 			err := json.Unmarshal([]byte(sampleBlockJSONRPC), args[1])
@@ -114,7 +113,7 @@ func TestGetBlockInfoByNumberNotFound(t *testing.T) {
 	mRPC.On("Invoke", mock.Anything, mock.Anything, "getblockhash", mock.Anything).
 		Return(nil).
 		Run(func(args mock.Arguments) {
-			arg1, ok := args[1].(*string)
+			arg1, ok := args[1].(*BlockHash)
 			assert.True(t, ok)
 			*arg1 = "null"
 		})

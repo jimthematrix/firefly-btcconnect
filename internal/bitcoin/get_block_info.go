@@ -19,11 +19,11 @@ package bitcoin
 import (
 	"context"
 	"encoding/json"
-	"math/big"
 
+	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/btcsuite/btcd/wire"
 	"github.com/hyperledger/firefly-btcconnect/internal/msgs"
 	"github.com/hyperledger/firefly-common/pkg/ffcapi"
-	"github.com/hyperledger/firefly-common/pkg/fftypes"
 	"github.com/hyperledger/firefly-common/pkg/i18n"
 )
 
@@ -38,13 +38,14 @@ type blockInfoJSONRPC struct {
 
 type BlockHash string
 
-func transformBlockInfo(bi *blockInfoJSONRPC, t *ffcapi.BlockInfo) {
-	t.BlockNumber = (*fftypes.FFBigInt)(big.NewInt(int64(bi.Number)))
-	t.BlockHash = bi.Hash
-	t.ParentHash = bi.ParentHash
-	stringHashes := make([]string, len(bi.Transactions))
-	copy(stringHashes, bi.Transactions)
-	t.TransactionHashes = stringHashes
+func transformBlockInfo(block *wire.MsgBlock, t *ffcapi.BlockInfo) {
+	t.BlockHash = block.BlockHash().String()
+	t.ParentHash = block.Header.PrevBlock.String()
+	txhashes := make([]string, len(block.Transactions))
+	for i, tx := range block.Transactions {
+		txhashes[i] = tx.TxHash().String()
+	}
+	t.TransactionHashes = txhashes
 }
 
 func (c *btcConnector) getBlockInfoByNumber(ctx context.Context, payload []byte) (interface{}, ffcapi.ErrorReason, error) {
@@ -56,26 +57,23 @@ func (c *btcConnector) getBlockInfoByNumber(ctx context.Context, payload []byte)
 	}
 
 	blockNumber := req.BlockNumber
-	var blockHash string
-	err = c.backend.Invoke(ctx, &blockHash, "getblockhash", blockNumber)
+	blockHash, err := c.backend.GetBlockHash(blockNumber.Int64())
 	if err != nil {
 		return nil, "", err
 	}
-	if blockHash == "null" {
+
+	if blockHash.String() == "null" {
 		return nil, ffcapi.ErrorReasonNotFound, i18n.NewError(ctx, msgs.MsgBlockNotAvailable)
 	}
 
-	var blockInfo *blockInfoJSONRPC
-	err = c.backend.Invoke(ctx, &blockInfo, "getblock", blockHash)
+	block, err := c.backend.GetBlock(blockHash)
 	if err != nil {
 		return nil, "", err
-	}
-	if blockInfo == nil {
-		return nil, ffcapi.ErrorReasonNotFound, i18n.NewError(ctx, msgs.MsgBlockNotAvailable)
 	}
 
 	res := &ffcapi.GetBlockInfoByNumberResponse{}
-	transformBlockInfo(blockInfo, &res.BlockInfo)
+	transformBlockInfo(block, &res.BlockInfo)
+	res.BlockInfo.BlockNumber = blockNumber
 	return res, "", nil
 
 }
@@ -88,17 +86,20 @@ func (c *btcConnector) getBlockInfoByHash(ctx context.Context, payload []byte) (
 		return nil, ffcapi.ErrorReasonInvalidInputs, err
 	}
 
-	var blockInfo *blockInfoJSONRPC
-	err = c.backend.Invoke(ctx, &blockInfo, "getblock", req.BlockHash)
+	blkHash, err := chainhash.NewHashFromStr(req.BlockHash)
 	if err != nil {
 		return nil, "", err
 	}
-	if blockInfo == nil {
+	block, err := c.backend.GetBlock(blkHash)
+	if err != nil {
+		return nil, "", err
+	}
+	if block == nil {
 		return nil, ffcapi.ErrorReasonNotFound, i18n.NewError(ctx, msgs.MsgBlockNotAvailable)
 	}
 
 	res := &ffcapi.GetBlockInfoByHashResponse{}
-	transformBlockInfo(blockInfo, &res.BlockInfo)
+	transformBlockInfo(block, &res.BlockInfo)
 	return res, "", nil
 
 }

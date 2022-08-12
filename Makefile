@@ -30,7 +30,7 @@ mocks-$(strip $(1))-$(strip $(2)): ${MOCKERY}
 	${MOCKERY} --case underscore --dir $(1) --name $(2) --outpkg $(3) --output mocks/$(strip $(3))
 endef
 
-$(eval $(call makemock, internal/jsonrpc,     Client,    jsonrpcmocks))
+$(eval $(call makemock, internal/jsonrpc,     WsClient,  jsonrpcmocks))
 $(eval $(call makemock, internal/ffcserver,   Server,    ffcservermocks))
 $(eval $(call makemock, internal/ffconnector, Connector, ffconnectormocks))
 

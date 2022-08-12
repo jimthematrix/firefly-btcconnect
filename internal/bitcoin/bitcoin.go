@@ -18,8 +18,11 @@ package bitcoin
 
 import (
 	"context"
-	"math/big"
+	"fmt"
+	"strings"
 
+	"github.com/btcsuite/btcwallet/netparams"
+	"github.com/go-resty/resty/v2"
 	"github.com/hyperledger/firefly-btcconnect/internal/ffconnector"
 	"github.com/hyperledger/firefly-btcconnect/internal/jsonrpc"
 	"github.com/hyperledger/firefly-btcconnect/internal/msgs"
@@ -27,12 +30,19 @@ import (
 	"github.com/hyperledger/firefly-common/pkg/ffcapi"
 	"github.com/hyperledger/firefly-common/pkg/ffresty"
 	"github.com/hyperledger/firefly-common/pkg/i18n"
+	"github.com/hyperledger/firefly-common/pkg/log"
+	"github.com/hyperledger/firefly-common/pkg/wsclient"
 )
 
 type btcConnector struct {
-	backend             jsonrpc.Client
-	gasEstimationFactor *big.Float
+	backend *jsonrpc.RPCClient
+	ctx     context.Context
 }
+
+const (
+	RequestTypeImportAddress ffcapi.RequestType = "import_address"
+	RequestTypeGetBalance    ffcapi.RequestType = "get_balance"
+)
 
 func NewBitcoinConnector(conf config.Section) ffconnector.Connector {
 	return &btcConnector{}
@@ -40,12 +50,14 @@ func NewBitcoinConnector(conf config.Section) ffconnector.Connector {
 
 func (c *btcConnector) HandlerMap() map[ffcapi.RequestType]ffconnector.FFCHandler {
 	return map[ffcapi.RequestType]ffconnector.FFCHandler{
-		ffcapi.RequestTypeCreateBlockListener: c.createBlockListener,
+		// ffcapi.RequestTypeCreateBlockListener: c.createBlockListener,
 		// ffcapi.RequestTypeExecQuery:            c.execQuery,
 		ffcapi.RequestTypeGetBlockInfoByHash:   c.getBlockInfoByHash,
 		ffcapi.RequestTypeGetBlockInfoByNumber: c.getBlockInfoByNumber,
+		RequestTypeImportAddress:               c.importAddress,
+		RequestTypeGetBalance:                  c.getBalance,
 		// ffcapi.RequestTypeGetGasPrice:          c.getGasPrice,
-		ffcapi.RequestTypeGetNewBlockHashes: c.getNewBlockHashes,
+		// ffcapi.RequestTypeGetNewBlockHashes: c.getNewBlockHashes,
 		// ffcapi.RequestTypeGetNextNonce:         c.getNextNonce,
 		// ffcapi.RequestTypeGetReceipt:           c.getReceipt,
 		// ffcapi.RequestTypePrepareTransaction:   c.prepareTransaction,
@@ -54,10 +66,63 @@ func (c *btcConnector) HandlerMap() map[ffcapi.RequestType]ffconnector.FFCHandle
 }
 
 func (c *btcConnector) Init(ctx context.Context, conf config.Section) error {
-	if conf.GetString(ffresty.HTTPConfigURL) == "" {
+	c.ctx = log.WithLogField(ctx, "proto", "bitcoin")
+
+	url := conf.GetString(ffresty.HTTPConfigURL)
+	if url == "" {
 		return i18n.NewError(ctx, msgs.MsgMissingBackendURL)
 	}
-	c.gasEstimationFactor = big.NewFloat(conf.GetFloat64(ConfigGasEstimationFactor))
-	c.backend = jsonrpc.NewRPCClient(ffresty.New(ctx, conf))
+
+	useWebsocket := false
+	if strings.HasPrefix(url, "ws") || conf.GetString(wsclient.WSConfigKeyPath) != "" {
+		useWebsocket = true
+	}
+	username := conf.GetString(ffresty.HTTPConfigAuthUsername)
+	password := conf.GetString(ffresty.HTTPConfigAuthPassword)
+	basicToken := conf.GetString("auth.basicToken")
+	bearerToken := conf.GetString("auth.bearerToken")
+	fmt.Printf("bearer: %s, basic: %s, username: %s, password: %s\n", bearerToken, basicToken, username, password)
+	if bearerToken == "" && basicToken == "" && (username == "" || password == "") {
+		return i18n.NewError(ctx, "Must specify one of auth.basicToken, auth.bearerToken, or auth.username + auth.password")
+	}
+
+	activeNet := &netparams.MainNetParams
+	if conf.GetString("network") == "testnet" {
+		activeNet = &netparams.TestNet3Params
+	}
+
+	var client interface{}
+	if useWebsocket {
+		wsclient, err := newWSClient(ctx, conf, basicToken, username, password)
+		if err != nil {
+			return err
+		}
+		client = wsclient
+	} else {
+		client = newHttpClient(ctx, conf, bearerToken, basicToken, username, password)
+	}
+
+	rpcclient := jsonrpc.NewRPCClient(ctx, client, activeNet.Params)
+	err := rpcclient.Start()
+	if err != nil {
+		return err
+	}
+	c.backend = rpcclient
+
 	return nil
+}
+
+func newHttpClient(ctx context.Context, conf config.Section, bearerToken, basicToken, username, password string) *resty.Client {
+	client := ffresty.New(ctx, conf)
+	switch {
+	case bearerToken != "":
+		client.SetAuthToken(bearerToken)
+	case basicToken != "":
+		client.SetAuthScheme("Basic")
+		client.SetAuthToken(basicToken)
+	default:
+		client.SetBasicAuth(username, password)
+	}
+
+	return client
 }

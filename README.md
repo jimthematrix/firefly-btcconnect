@@ -33,3 +33,15 @@ connectors:
     bitcoin:
       url: http://localhost:8332
 ```
+
+## Launch btcd
+
+```
+./btcd -C ~/.btcd/btcd.conf --datadir ~/.btcd/testnet
+```
+
+## Launch btcwallet
+
+````
+ curl --user myuser -d '{"jsonrpc": "1.0", "id": "curltest", "method": "getblockchaininfo", "params": []}' -H 'content-type: application/json;' --cacert ~/.btcwallet/testnet/rpc.cert https://127.0.0.1:8332/ | jq```
+````

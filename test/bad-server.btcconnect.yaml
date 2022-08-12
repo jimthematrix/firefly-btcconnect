@@ -4,3 +4,6 @@ connectors:
       address: :::::::wrong
     bitcoin:
       url: http://localhost:8332
+      auth:
+        username: "user1"
+        password: "password1"

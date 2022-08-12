@@ -36,4 +36,14 @@ func InitConfig(conf config.Section) {
 
 	conf.AddKnownKey(ConfigGasEstimationFactor, DefaultGasEstimationFactor)
 	conf.AddKnownKey(ConfigDataFormat, "map")
+	conf.AddKnownKey("auth.bearerToken")
+	conf.AddKnownKey("auth.basicToken")
+	conf.AddKnownKey("network")
+	conf.AddKnownKey("ws.readBufferSize")
+	conf.AddKnownKey("ws.writeBufferSize")
+	conf.AddKnownKey("ws.initialConnectAttempts")
+	conf.AddKnownKey("ws.heartbeatInterval")
+	conf.AddKnownKey("ws.path")
+	conf.AddKnownKey("ws.tls.enabled")
+	conf.AddKnownKey("ws.tls.certificates")
 }
