@@ -10,7 +10,14 @@ GOGC=30
 
 .DELETE_ON_ERROR:
 
-all: build test go-mod-tidy
+all: govulncheck build test go-mod-tidy
+# govulncheck
+GOVULNCHECK := $(GOBIN)/govulncheck
+.PHONY: govulncheck
+govulncheck: ${GOVULNCHECK}
+	./govulnchecktool.sh
+${GOVULNCHECK}:
+	${VGO} install golang.org/x/vuln/cmd/govulncheck@latest
 test: deps lint
 		$(VGO) test ./internal/... ./cmd/... -cover -coverprofile=coverage.txt -covermode=atomic -timeout=30s
 coverage.html:
